@@ -1,60 +1,217 @@
-const GEMINI_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GEMINI_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-export const generateExplanation = async (sensorData) => {
+export const generateExplanation = async (history) => {
+
+  console.log("GEMINI FUNCTION CALLED");
+
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
-  if (!apiKey) {
-    throw new Error('Gemini API key not found. Please add VITE_GEMINI_API_KEY to your .env file');
-  }
+  if (!apiKey) return "API key missing";
 
-  const prompt = `As an IoT system analyst, analyze the following sensor readings and provide a detailed explanation:
+  if (!history || history.length < 2) return "Not enough data";
 
-Temperature: ${sensorData.temperature}°C
-Humidity: ${sensorData.humidity}%
-Air Quality Index (AQI): ${sensorData.aqi}
-Gas Level: ${sensorData.gas} ppm
-Motion Detected: ${sensorData.motion ? 'Yes' : 'No'}
 
-Please explain:
-1. What these sensor values indicate about the current environment
-2. Possible reasons for these readings
-3. Environmental factors that could have caused these values
-4. Any recommendations or concerns based on these readings
 
-Provide a comprehensive yet concise explanation suitable for a smart home monitoring system.`;
+  // =========================
+  // Prepare data
+  // =========================
+
+  const latest = history[history.length - 1];
+
+  const previous = history.slice(-10, -1);
+
+
+
+  const avg = (key) =>
+    previous.reduce((sum, item) => sum + item[key], 0) / previous.length;
+
+
+
+  const avgTemp = avg("temperature");
+  const avgHumidity = avg("humidity");
+  const avgAqi = avg("aqi");
+  const avgGas = avg("gas");
+
+
+
+  const diffTemp = latest.temperature - avgTemp;
+  const diffHumidity = latest.humidity - avgHumidity;
+  const diffAqi = latest.aqi - avgAqi;
+  const diffGas = latest.gas - avgGas;
+
+
+
+  // =========================
+  // AI Prompt
+  // =========================
+
+  const prompt = `
+
+You are an IoT sensor analyst.
+
+Analyze ONLY this sensor data.
+
+Do NOT assume anything.
+
+Do NOT imagine anything.
+
+Use ONLY numbers given.
+
+
+
+Previous Average:
+
+Temperature: ${avgTemp.toFixed(1)} °C
+Humidity: ${avgHumidity.toFixed(1)} %
+AQI: ${avgAqi.toFixed(0)}
+Gas: ${avgGas.toFixed(0)} ppm
+
+
+
+Latest Reading:
+
+Temperature: ${latest.temperature} °C
+Humidity: ${latest.humidity} %
+AQI: ${latest.aqi}
+Gas: ${latest.gas} ppm
+Motion: ${latest.motion ? "Detected" : "Not detected"}
+
+
+
+Change:
+
+Temperature change: ${diffTemp.toFixed(1)} °C
+Humidity change: ${diffHumidity.toFixed(1)} %
+AQI change: ${diffAqi.toFixed(0)}
+Gas change: ${diffGas.toFixed(0)}
+
+
+
+Rules:
+
+• Explain ONLY based on data
+
+• Say exact problem
+
+• Say exact action
+
+• Maximum 2 lines
+
+• Very simple human language
+
+
+
+Examples:
+
+Room hotter than usual → Turn on fan.
+
+Room colder than usual → Close window.
+
+Gas higher than usual → Open window.
+
+AQI higher than usual → Improve ventilation.
+
+Motion detected → Someone is in room.
+
+
+
+Now generate explanation.
+
+`;
+
+
+
+  console.log("PROMPT:", prompt);
+
+
 
   try {
+
+    // =========================
+    // API Call
+    // =========================
+
     const response = await fetch(GEMINI_API_URL, {
-      method: 'POST',
+
+      method: "POST",
+
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+
+        "Content-Type": "application/json",
+
+        Authorization: `Bearer ${apiKey}`,
+
       },
+
       body: JSON.stringify({
-        model: "openai/gpt-oss-20b",
-        messages: [{
-          role: 'user',
-          content: prompt
-        }],
-        max_tokens: 1024
-      })
+
+        model: "llama-3.3-70b-versatile",
+
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+
+        temperature: 0.3,
+
+        max_tokens: 100,
+
+      }),
+
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || 'Failed to generate explanation');
-    }
+
 
     const data = await response.json();
-    const explanation = data.choices?.[0]?.message?.content;
 
-    if (!explanation) {
-      throw new Error('No explanation generated');
-    }
+    console.log("API RESPONSE:", data);
 
-    return explanation;
-  } catch (error) {
-    console.error('Error calling Gemini API:', error);
-    throw error;
+
+
+    // =========================
+    // FIXED RESPONSE EXTRACTION
+    // =========================
+
+    let text = "";
+
+
+
+    if (data?.choices?.[0]?.message?.content)
+      text = data.choices[0].message.content;
+
+    else if (data?.choices?.[0]?.text)
+      text = data.choices[0].text;
+
+    else if (data?.choices?.[0]?.delta?.content)
+      text = data.choices[0].delta.content;
+
+
+
+    text = text?.trim();
+
+
+
+    console.log("FINAL AI TEXT:", text);
+
+
+
+    if (!text)
+      return "No AI response";
+
+
+
+    return text;
+
   }
+
+  catch (error) {
+
+    console.error("AI ERROR:", error);
+
+    return "Error generating explanation";
+
+  }
+
 };
